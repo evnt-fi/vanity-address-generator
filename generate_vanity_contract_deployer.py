@@ -154,7 +154,7 @@ def main(prefix, suffix, max_nonce=50, match_case=False, num_processes=None):
             total_guesses.value += stats_queue.get()
 
 if __name__ == "__main__":
-    print(f"Searching for deployer EOA to deploy contract address like: 0x{prefix}...{suffix}")
+    print(f"Searching for EOA to deploy contract address like: 0x{prefix}...{suffix}")
     print(f"Matching case: {match_case}")
     print(f"Checking up to nonce {max_nonce}")
     print(f"Using {num_processes} worker processes (+1 for logging).")
