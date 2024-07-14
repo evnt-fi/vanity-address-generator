@@ -7,7 +7,7 @@ import multiprocessing as mp
 import math
 
 # TODO: Edit these values to match your desired pattern
-prefix = "B00B5"  # The desired prefix for the vanity address
+prefix = "B"  # The desired prefix for the vanity address
 suffix = ""  # The desired suffix for the vanity address
 match_case = True # if True, checksum (case-sensitive) address matching is performed
 max_nonce = 5
@@ -24,7 +24,8 @@ def calculate_contract_address(eoa_address, nonce):
 
 def check_vanity_pattern(address: str, prefix: str, suffix: str, match_case: bool = False):
     if match_case:
-        address = to_checksum_address(address)
+        full_address = to_checksum_address('0x' + address)
+        address = full_address[2:]
     else:
         address = address.lower()
         prefix = prefix.lower()

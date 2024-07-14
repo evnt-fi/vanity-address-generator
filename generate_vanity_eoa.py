@@ -26,7 +26,8 @@ def get_eoa_address(private_key):
 
 def check_vanity_pattern(address: str, prefix: str, suffix: str, match_case: bool = False):
     if match_case:
-        address = to_checksum_address(address)
+        full_address = to_checksum_address('0x' + address)
+        address = full_address[2:]
     else:
         address = address.lower()
         prefix = prefix.lower()
@@ -49,7 +50,7 @@ def worker(prefix, suffix, max_derivations, match_case, result_queue, stats_queu
                 # Generate Ethereum address
                 derivation_path = f"m/44'/60'/0'/0/{i}"
                 account = Account.from_mnemonic(mnemonic_str, account_path=derivation_path)
-                address = to_checksum_address(account.address)
+                address = account.address[2:]
                 
                 # Check if address matches the desired prefix and suffix
                 if check_vanity_pattern(address, prefix, suffix, match_case):
