@@ -22,8 +22,9 @@ Then run the script:
 python generate_vanity_contract_deployer.py
 ```
 
+---
 
-# Step 2: Generate vanity EOAs
+# Generate vanity EOAs
 
 This will find a 12-word mnemonic seed that will generate an EOA with a public key that matches the given prefix and suffix.
 
@@ -34,7 +35,7 @@ Then run the script:
 python generate_vanity_eoa.py
 ```
 
-
+---
 
 ## Contract Address Checker
 
