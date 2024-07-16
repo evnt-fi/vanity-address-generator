@@ -1,67 +1,64 @@
 import multiprocessing as mp
 import time
 import math
-from eth_account import Account
-from bip_utils import Bip39MnemonicGenerator, Bip39WordsNum
 import secrets
+from eth_account import Account
 from eth_utils import to_checksum_address
-
+from bip_utils import Bip39MnemonicGenerator, Bip39SeedGenerator, Bip44, Bip44Coins, Bip44Changes
+from typing import List, Tuple
+from collections import namedtuple
 
 # TODO: Edit these values to match your desired pattern
-prefix = "B00B5"  # The desired prefix for the vanity address
+prefix = "00000"  # The desired prefix for the vanity address
 suffix = ""  # The desired suffix for the vanity address
-match_case = True  # If True, checksum (case-sensitive) address matching is performed
-max_derivations = 10  # Maximum number of derivations addresses to check for a given mnemonic
+match_case = True  # If True, checksum (case-sensitive) address matching is performed. Use True if only matching numbers to avoid cost of calling .lower() on address string.
+max_derivations = 25  # Maximum number of derivations addresses to check for a given mnemonic
 num_processes = max(1, mp.cpu_count() - 2)  # Use all available CPU cores except one (and save one for logging)
 
 # Enable unaudited hdwallet features
-Account.enable_unaudited_hdwallet_features()
+# Account.enable_unaudited_hdwallet_features()
 
+GeneratedAddresses = namedtuple("GeneratedAddresses", ["pk", "address", "index"])
 
+def generate_eth_addresses_from_mnemonic(mnemonic, account=0, change=Bip44Changes.CHAIN_EXT, addresses_to_check=10) -> List[GeneratedAddresses]:
+    # Generate seed from mnemonic
+    seed_bytes = Bip39SeedGenerator(mnemonic).Generate()
 
-
-def get_eoa_address(private_key):
-    return Account.from_key(private_key).address
-
+    # Generate the root key from the seed
+    bip44_mst_ctx = Bip44.FromSeed(seed_bytes, Bip44Coins.ETHEREUM)
+    
+    # Derive the addresses from the seed
+    addresses = []
+    for address_index in range(addresses_to_check):
+        bip44_acc_ctx = bip44_mst_ctx.Purpose().Coin().Account(account).Change(change).AddressIndex(address_index)
+        priv_key = bip44_acc_ctx.PrivateKey().Raw().ToHex()
+        eth_account = Account.from_key(priv_key)
+        addresses.append(GeneratedAddresses(priv_key, eth_account.address, address_index))
+    return addresses
 
 def check_vanity_pattern(address: str, prefix: str, suffix: str, match_case: bool = False):
-    if match_case:
-        full_address = to_checksum_address('0x' + address)
-        address = full_address[2:]
-    else:
+    if not match_case:
         address = address.lower()
-        prefix = prefix.lower()
-        suffix = suffix.lower()
     return address.startswith(prefix) and address.endswith(suffix)
 
-    
 def worker(prefix, suffix, max_derivations, match_case, result_queue, stats_queue):
     local_guesses = 0
     while True:
         try:
             # Generate a random mnemonic
-            pk = secrets.token_bytes(32)
-            mnemonic = Bip39MnemonicGenerator().FromEntropy(pk)
-            mnemonic_str = mnemonic.ToStr()
-            
-            # Check multiple derived addresses
-            for i in range(max_derivations):
+            mnemonic = Bip39MnemonicGenerator().FromEntropy(secrets.token_bytes(32)).ToStr()
+                    
+            # Derive max_derivations addresses for this mnemonic
+            generated_addresses = generate_eth_addresses_from_mnemonic(mnemonic, addresses_to_check=max_derivations)
+            for address in generated_addresses:
                 local_guesses += 1
-                # Generate Ethereum address
-                derivation_path = f"m/44'/60'/0'/0/{i}"
-                account = Account.from_mnemonic(mnemonic_str, account_path=derivation_path)
-                address = account.address[2:]
-                
-                # Check if address matches the desired prefix and suffix
-                if check_vanity_pattern(address, prefix, suffix, match_case):
-                    result_queue.put((i, address, mnemonic_str))
-
+                if check_vanity_pattern(address.address[2:], prefix, suffix, match_case):
+                    result_queue.put((address.index, address.address, mnemonic))
+                    
             stats_queue.put(local_guesses)
             local_guesses = 0  # Reset local counter after reporting
         except Exception as e:
             print(f"Error in worker process: {e}")
-
-
 
 def calculate_probability(prefix, suffix, match_case):
     if match_case:
@@ -120,7 +117,7 @@ def log_progress(stats_queue, start_time, total_guesses, should_exit, prefix, su
             last_log_time = current_time
         time.sleep(0.1)  # Sleep to reduce CPU usage of this process
 
-def main(prefix, suffix, max_derivations=5, match_case=False, num_processes=None):
+def main(prefix: str, suffix: str, max_derivations: int = 5, match_case: bool = False, num_processes: int = None):
     if num_processes is None:
         num_processes = max(1, mp.cpu_count() - 1)  # Leave one CPU for logging
     
@@ -129,6 +126,11 @@ def main(prefix, suffix, max_derivations=5, match_case=False, num_processes=None
     stats_queue = mp.Queue()
     total_guesses = mp.Value('i', 0)
     should_exit = mp.Event()
+
+    if not match_case:
+        prefix = prefix.lower()
+        suffix = suffix.lower()
+
 
     processes = []
     for _ in range(num_processes):
@@ -151,11 +153,6 @@ def main(prefix, suffix, max_derivations=5, match_case=False, num_processes=None
             print(f"EOA Address: {eoa_address}")
             print(f"Derivation Path: {derivation_path}")
             print(f"Mnemonic:")
-            # split into 3 words per line
-            for i in range(0, len(mnemonic_str), 3):
-                print(mnemonic_str[i:i+3])
-            
-            print("---")
             mnemonic_words = mnemonic_str.split()
             for i in range(0, len(mnemonic_words), 3):
                 print(" ".join(mnemonic_words[i:i+3]))
@@ -180,10 +177,6 @@ def main(prefix, suffix, max_derivations=5, match_case=False, num_processes=None
         while not stats_queue.empty():
             total_guesses.value += stats_queue.get()
 
-
-
-
-
 if __name__ == "__main__":
     print(f"Searching for EOA addresses matching: 0x{prefix}...{suffix}")
     print(f"Matching case: {match_case}")
@@ -191,5 +184,6 @@ if __name__ == "__main__":
     print(f"Using {num_processes} worker processes (+1 for logging).")
     print("Press Ctrl+C to stop the program")
     print("---")
-    
+    time.sleep(1)
+
     main(prefix, suffix, max_derivations, match_case, num_processes)
