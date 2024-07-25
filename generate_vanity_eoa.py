@@ -9,10 +9,10 @@ from typing import List, Tuple
 from collections import namedtuple
 
 # TODO: Edit these values to match your desired pattern
-prefix = "00000"  # The desired prefix for the vanity address
+prefix = "0000"  # The desired prefix for the vanity address
 suffix = ""  # The desired suffix for the vanity address
 match_case = True  # If True, checksum (case-sensitive) address matching is performed. Use True if only matching numbers to avoid cost of calling .lower() on address string.
-max_derivations = 25  # Maximum number of derivations addresses to check for a given mnemonic
+max_derivations = 50  # Maximum number of derivations addresses to check for a given mnemonic
 num_processes = max(1, mp.cpu_count() - 2)  # Use all available CPU cores except one (and save one for logging)
 
 # Enable unaudited hdwallet features

@@ -7,7 +7,7 @@ import multiprocessing as mp
 import math
 
 # TODO: Edit these values to match your desired pattern
-prefix = "B"  # The desired prefix for the vanity address
+prefix = "ABCD"  # The desired prefix for the vanity address
 suffix = ""  # The desired suffix for the vanity address
 match_case = True # if True, checksum (case-sensitive) address matching is performed
 max_nonce = 5
@@ -28,8 +28,6 @@ def check_vanity_pattern(address: str, prefix: str, suffix: str, match_case: boo
         address = full_address[2:]
     else:
         address = address.lower()
-        prefix = prefix.lower()
-        suffix = suffix.lower()
     return address.startswith(prefix) and address.endswith(suffix)
 
     
@@ -115,6 +113,10 @@ def main(prefix, suffix, max_nonce=50, match_case=False, num_processes=None):
     total_guesses = mp.Value('i', 0)
     should_exit = mp.Event()
 
+    if not match_case:
+        prefix = prefix.lower()
+        suffix = suffix.lower()
+
     processes = []
     for _ in range(num_processes):
         p = mp.Process(target=worker, args=(prefix, suffix, max_nonce, match_case, result_queue, stats_queue))
@@ -129,12 +131,13 @@ def main(prefix, suffix, max_nonce=50, match_case=False, num_processes=None):
         while True:
             result = result_queue.get()  # This will block until a result is available
             private_key, eoa_address, nonce, contract_address = result
+            contract_address = to_checksum_address('0x' + contract_address)
             elapsed_time = time.time() - start_time
             print(f"\nMatch found after {total_guesses.value} guesses and {elapsed_time:.2f} seconds!")
             print(f"Private Key: 0x{private_key.hex()}")
             print(f"EOA Address: {eoa_address}")
             print(f"Nonce: {nonce}")
-            print(f"Contract Address: 0x{contract_address}")
+            print(f"Contract Address: {contract_address}")
             print("---")
             start_time = time.time() # reset the start time for the next match
     except KeyboardInterrupt:
