@@ -8,9 +8,11 @@ from bip_utils import Bip39MnemonicGenerator, Bip39SeedGenerator, Bip44, Bip44Co
 from typing import List, Tuple
 from collections import namedtuple
 
+
 # Patterns to match
 patterns = [
-    ["0000", "", True],
+    ["0000000", "", True],
+    ["coffee", "", True],
 
 ]
 
@@ -122,6 +124,20 @@ def log_progress(stats_queue, start_time, total_guesses, should_exit, patterns):
             last_log_time = current_time
         time.sleep(0.1)  # Sleep to reduce CPU usage of this process
 
+def write_result_to_file(result):
+    derivation_num, eoa_address, mnemonic_str, matched_prefix, matched_suffix = result
+    derivation_path = f"m/44'/60'/0'/0/{derivation_num}"
+    
+    with open('results.txt', 'a') as f:
+        f.write(f"EOA Address: {eoa_address}\n")
+        f.write(f"Matched Pattern: prefix='{matched_prefix}', suffix='{matched_suffix}'\n")
+        f.write(f"Derivation Path: {derivation_path}\n")
+        f.write("Mnemonic:\n")
+        mnemonic_words = mnemonic_str.split()
+        for i in range(0, len(mnemonic_words), 3):
+            f.write(" ".join(mnemonic_words[i:i+3]) + "\n")
+        f.write("---\n\n")
+
 def main(patterns: List[Tuple[str, str, bool]], max_derivations: int = 5, num_processes: int = None):
     if num_processes is None:
         num_processes = max(1, mp.cpu_count() - 1)  # Leave one CPU for logging
@@ -160,6 +176,9 @@ def main(patterns: List[Tuple[str, str, bool]], max_derivations: int = 5, num_pr
             
             print("---")
 
+            # Write result to file
+            write_result_to_file(result)
+
             start_time = time.time() # reset the start time for the next match
     except KeyboardInterrupt:
         print("\nProgram terminated by user")
@@ -185,6 +204,7 @@ if __name__ == "__main__":
     print(f"Checking up to {max_derivations} derivations")
     print(f"Using {num_processes} worker processes (+1 for logging).")
     print("Press Ctrl+C to stop the program")
+    print("Results will be saved in 'results.txt'")
     print("---")
     time.sleep(1)
 
