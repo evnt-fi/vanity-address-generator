@@ -29,12 +29,24 @@ def print_result(mnemonic, derivation_number, eoa_address):
     print(f"Derivation Path: m/44'/60'/0'/0/{derivation_number}")
     print(f"EOA Address: {eoa_address}\n")
 
+def get_multiline_input(prompt):
+    print(prompt)
+    print("(Press Enter twice to finish input)")
+    lines = []
+    while True:
+        line = input()
+        if line:
+            lines.append(line)
+        else:
+            break
+    return ' '.join(lines)
+
 def interactive_mode():
     print("Ethereum Vanity EOA Checker")
     print("===========================")
     
     while True:
-        mnemonic = input("Enter the mnemonic phrase (or 'q' to quit): ")
+        mnemonic = get_multiline_input("Enter the mnemonic phrase (or 'q' to quit):")
         if mnemonic.lower() == 'q':
             break
         
