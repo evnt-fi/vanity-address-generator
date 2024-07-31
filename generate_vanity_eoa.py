@@ -8,10 +8,12 @@ from bip_utils import Bip39MnemonicGenerator, Bip39SeedGenerator, Bip44, Bip44Co
 from typing import List, Tuple
 from collections import namedtuple
 
-# TODO: Edit these values to match your desired pattern
-prefix = "0000"  # The desired prefix for the vanity address
-suffix = ""  # The desired suffix for the vanity address
-match_case = True  # If True, checksum (case-sensitive) address matching is performed. Use True if only matching numbers to avoid cost of calling .lower() on address string.
+# Patterns to match
+patterns = [
+    ["0000", "", True],
+
+]
+
 max_derivations = 50  # Maximum number of derivations addresses to check for a given mnemonic
 num_processes = max(1, mp.cpu_count() - 2)  # Use all available CPU cores except one (and save one for logging)
 
@@ -39,9 +41,11 @@ def generate_eth_addresses_from_mnemonic(mnemonic, account=0, change=Bip44Change
 def check_vanity_pattern(address: str, prefix: str, suffix: str, match_case: bool = False):
     if not match_case:
         address = address.lower()
+        prefix = prefix.lower()
+        suffix = suffix.lower()
     return address.startswith(prefix) and address.endswith(suffix)
 
-def worker(prefix, suffix, max_derivations, match_case, result_queue, stats_queue):
+def worker(patterns, max_derivations, result_queue, stats_queue):
     local_guesses = 0
     while True:
         try:
@@ -52,38 +56,39 @@ def worker(prefix, suffix, max_derivations, match_case, result_queue, stats_queu
             generated_addresses = generate_eth_addresses_from_mnemonic(mnemonic, addresses_to_check=max_derivations)
             for address in generated_addresses:
                 local_guesses += 1
-                if check_vanity_pattern(address.address[2:], prefix, suffix, match_case):
-                    result_queue.put((address.index, address.address, mnemonic))
+                for prefix, suffix, match_case in patterns:
+                    if check_vanity_pattern(address.address[2:], prefix, suffix, match_case):
+                        result_queue.put((address.index, address.address, mnemonic, prefix, suffix))
+                        break  # Move to next address if a match is found
                     
             stats_queue.put(local_guesses)
             local_guesses = 0  # Reset local counter after reporting
         except Exception as e:
             print(f"Error in worker process: {e}")
 
-def calculate_probability(prefix, suffix, match_case):
-    if match_case:
-        # For checksum addresses, we need to consider the case sensitivity
-        lowercase_chars = sum(1 for c in prefix + suffix if c.islower())
-        uppercase_chars = sum(1 for c in prefix + suffix if c.isupper())
-        numeric_chars = sum(1 for c in prefix + suffix if c.isdigit())
+def calculate_probability(patterns):
+    total_prob = 0
+    for prefix, suffix, match_case in patterns:
+        if match_case:
+            lowercase_chars = sum(1 for c in prefix + suffix if c.islower())
+            uppercase_chars = sum(1 for c in prefix + suffix if c.isupper())
+            numeric_chars = sum(1 for c in prefix + suffix if c.isdigit())
+            
+            p_lower = 1 / 36  # Probability of a correct lowercase character
+            p_upper = 1 / 36  # Probability of a correct uppercase character
+            p_num = 1 / 16    # Probability of a correct numeric character
+            
+            prob = (p_lower ** lowercase_chars) * (p_upper ** uppercase_chars) * (p_num ** numeric_chars)
+        else:
+            total_chars = len(prefix) + len(suffix)
+            prob = (1 / 16) ** total_chars
         
-        p_lower = 1 / 36  # Probability of a correct lowercase character
-        p_upper = 1 / 36  # Probability of a correct uppercase character
-        p_num = 1 / 16    # Probability of a correct numeric character
-        
-        prob = (p_lower ** lowercase_chars) * (p_upper ** uppercase_chars) * (p_num ** numeric_chars)
-    else:
-        # If not case-sensitive, each character has 1/16 probability
-        total_chars = len(prefix) + len(suffix)
-        prob = (1 / 16) ** total_chars
+        total_prob += prob
     
-    return prob
+    return total_prob
 
 def estimate_eta_50_percent(probability, guesses_per_second):
-    # Number of guesses needed for 50% probability
     guesses_for_50_percent = math.log(0.5) / math.log(1 - probability)
-    
-    # Time to reach 50% probability
     eta_seconds = guesses_for_50_percent / guesses_per_second
     return eta_seconds
 
@@ -97,9 +102,9 @@ def format_time(seconds):
     else:
         return f"{seconds/86400:.2f} days"
 
-def log_progress(stats_queue, start_time, total_guesses, should_exit, prefix, suffix, match_case):
+def log_progress(stats_queue, start_time, total_guesses, should_exit, patterns):
     last_log_time = time.time()
-    probability = calculate_probability(prefix, suffix, match_case)
+    probability = calculate_probability(patterns)
     while not should_exit.is_set():
         current_time = time.time()
         if current_time - last_log_time > 5:
@@ -117,7 +122,7 @@ def log_progress(stats_queue, start_time, total_guesses, should_exit, prefix, su
             last_log_time = current_time
         time.sleep(0.1)  # Sleep to reduce CPU usage of this process
 
-def main(prefix: str, suffix: str, max_derivations: int = 5, match_case: bool = False, num_processes: int = None):
+def main(patterns: List[Tuple[str, str, bool]], max_derivations: int = 5, num_processes: int = None):
     if num_processes is None:
         num_processes = max(1, mp.cpu_count() - 1)  # Leave one CPU for logging
     
@@ -127,30 +132,26 @@ def main(prefix: str, suffix: str, max_derivations: int = 5, match_case: bool = 
     total_guesses = mp.Value('i', 0)
     should_exit = mp.Event()
 
-    if not match_case:
-        prefix = prefix.lower()
-        suffix = suffix.lower()
-
-
     processes = []
     for _ in range(num_processes):
-        p = mp.Process(target=worker, args=(prefix, suffix, max_derivations, match_case, result_queue, stats_queue))
+        p = mp.Process(target=worker, args=(patterns, max_derivations, result_queue, stats_queue))
         p.start()
         processes.append(p)
 
     # Start a process for logging progress
-    log_process = mp.Process(target=log_progress, args=(stats_queue, start_time, total_guesses, should_exit, prefix, suffix, match_case))
+    log_process = mp.Process(target=log_progress, args=(stats_queue, start_time, total_guesses, should_exit, patterns))
     log_process.start()
 
     try:
         while True:
             result = result_queue.get()  # This will block until a result is available
-            derivation_num, eoa_address, mnemonic_str = result
+            derivation_num, eoa_address, mnemonic_str, matched_prefix, matched_suffix = result
             elapsed_time = time.time() - start_time
             derivation_path = f"m/44'/60'/0'/0/{derivation_num}"
 
             print(f"\nMatch found after {total_guesses.value} guesses and {format_time(elapsed_time)}!")
             print(f"EOA Address: {eoa_address}")
+            print(f"Matched Pattern: prefix='{matched_prefix}', suffix='{matched_suffix}'")
             print(f"Derivation Path: {derivation_path}")
             print(f"Mnemonic:")
             mnemonic_words = mnemonic_str.split()
@@ -178,12 +179,13 @@ def main(prefix: str, suffix: str, max_derivations: int = 5, match_case: bool = 
             total_guesses.value += stats_queue.get()
 
 if __name__ == "__main__":
-    print(f"Searching for EOA addresses matching: 0x{prefix}...{suffix}")
-    print(f"Matching case: {match_case}")
+    print(f"Searching for EOA addresses matching the following patterns:")
+    for prefix, suffix, match_case in patterns:
+        print(f"- 0x{prefix}...{suffix} (case sensitive: {match_case})")
     print(f"Checking up to {max_derivations} derivations")
     print(f"Using {num_processes} worker processes (+1 for logging).")
     print("Press Ctrl+C to stop the program")
     print("---")
     time.sleep(1)
 
-    main(prefix, suffix, max_derivations, match_case, num_processes)
+    main(patterns, max_derivations, num_processes)
